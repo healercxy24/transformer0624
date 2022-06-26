@@ -54,16 +54,17 @@ def add_RUL_test(dataset, truth_rul):
     
     return dataset
     
-#%% training set processing
+
+#%% dataset processing
 
 def dataset_process(dataset_name):
     """
     Parameters:
         dataset_name : string : 'FD001', 'FD002', 'FD003', 'FD004'
     return:
-        train_set : [100,] --> [20631, 26]
-        test_set : [100,] --> [20631, 26]
-        in total 26 features(including : id, cycle, 3 setting operations, 21 sensor datas)
+        train_set : [100,] --> [20631, 18]
+        test_set : [100,] --> [20631, 18]
+        in total 18 features(including : id, cycle, 2 setting operations, 14 sensor datas)
     """
     
     root_path = './CMAPSSDataNASA/'
@@ -92,18 +93,19 @@ def dataset_process(dataset_name):
     
     
     '''process the train data'''
-    title = train_df.iloc[:, 0:2]
-    data = train_df.iloc[:, 2:]
+    title = train_df.iloc[:, 0:2]  #[id,cycle]
+    data = train_df.iloc[:, 2:]  # [20631, 16]
     
     # minmaxscaler for data
     data_norm = (data - data.min())/(data.max() - data.min()) 
-    data_norm = data_norm.fillna(0) # replace all the NaN with 0    
-    # add RUL col to title
-    title = add_RUL(title)    
+    data_norm = data_norm.fillna(0) # replace all the NaN with 0        
     # merge title & data_norm
-    train_data = pd.concat([title, data_norm], axis=1)   # [20631, 27]     
+    train_data = pd.concat([title, data_norm], axis=1).to_numpy()   # [20631, 18]    
+    # add RUL col to title
+    title = add_RUL(title) 
     # group the training set with 'id'
     #train_group = train_data.groupby(by="id")
+    train_label = title['RUL'].to_numpy()
     
     
     '''process the test data'''
@@ -112,16 +114,17 @@ def dataset_process(dataset_name):
     
     # minmaxscaler for data
     data_norm = (data - data.min())/(data.max() - data.min()) 
-    data_norm = data_norm.fillna(0) # replace all the NaN with 0
-    # add RUL col to title
-    title = add_RUL_test(title, rul_df)
-    
+    data_norm = data_norm.fillna(0) # replace all the NaN with 0   
     # merge title & data_norm
-    test_data = pd.concat([title, data_norm], axis=1)   # [13096, 27]     
+    test_data = pd.concat([title, data_norm], axis=1).to_numpy()   # [13096, 18]   
+    # add RUL col to title
+    title = add_RUL_test(title, rul_df)  
     # group the training set with 'id'
     #test_group = test_data.groupby(by="id")
+    test_label = title['RUL'].to_numpy()
     
-    return train_data, test_data, rul_df
+    return train_data, train_label, test_data, test_label
+
 
 #%% PCA processing with numpy
 import numpy as np
@@ -136,7 +139,7 @@ def pca(input_data, M): # M is the components you want
         data: ->narrya of float64;
     """
     
-    input_data = input_data.values
+    #input_data = input_data.values
     #mean of each feature
     n_samples, n_features = input_data.shape
     mean=np.array([np.mean(input_data[:,i]) for i in range(n_features)])
@@ -165,7 +168,7 @@ def pca(input_data, M): # M is the components you want
 def gen_sequence(data, seq_len):
     
     num_elements = data.shape[0]
-    data = data.to_numpy()
+    #data = data.to_numpy()
     for start, stop in zip(range(0, num_elements - seq_len), range(seq_len, num_elements)):
         yield data[start:stop, :]
 
@@ -183,76 +186,53 @@ loss the number of seq_len data because of gen_sequence :
     trainset : 20631 = 16000 + 4581 + seq_len
 
 training set:
-    train_seq_tensor : torch.Size([16000, 26])
+    train_seq_tensor : torch.Size([16000, 50, 18])
     train_label_tensor : torch.Size([16000])
-    valid_seq_tensor : torch.Size([4631, 26])
-    valid_label_tensor : torch.Size([4631])
+    valid_seq_tensor : torch.Size([4581, 50, 18])
+    valid_label_tensor : torch.Size([4581])
 
 
 testing set: 
-    test_seq_tensor : torch.Size([13096, 26])
-    test_label_tensor : torch.Size([13096])
+    test_seq_tensor : torch.Size([13046, 50, 18])
+    test_label_tensor : torch.Size([13046])
 """
 
 
 def get_dataset(dataset_name, seq_len):   
     
-    train_data, test_data, _ = dataset_process(dataset_name)  
+    train_data, train_label, test_data, test_label = dataset_process(dataset_name)  
+    #train_data = pca(train_data, 8)
+    #test_data = pca(test_data, 8)
     
     '''generate sequences for train data'''   
     # generate labels for train
-    train_label = train_data['RUL'].to_numpy()
     train_label = list(gen_labels(train_label, seq_len))
-    label_tensor = torch.tensor(train_label)   # torch.Size([20581, 50])
+    train_label = np.array(train_label)
+    label_tensor = torch.tensor(train_label)   # torch.Size([20581])
     label_tensor = label_tensor.float().to(device)
     
-    train_data.drop(train_data.columns[2], axis=1, inplace=True) # can't put RUL as a feature for training
     #train_data = pca(train_data, 8)     
     seq_array = list(gen_sequence(train_data, seq_len))  
     seq_tensor = torch.tensor(seq_array)    # [20581, 50, 18]
     seq_tensor = seq_tensor.float().to(device)   
 
-    """
-    # split into train&valid
-    seq_list = np.array(seq_tensor.cpu()) # [20581, 50, 26]
-    label_list = np.array(label_tensor.cpu()) # [20581, 50]
-    
-    np.random.seed(123)
-    temp = np.arange(0, len(seq_list)) # [20581,]
-    np.random.shuffle(temp)
-    
-    # shuffle the index
-    new_seq_tensor = []
-    new_label_tensor = []
-    for i in temp:
-        new_seq_tensor.append(seq_list[i])
-        new_label_tensor.append(label_list[i])
-    
-    # get new tensor according to new index
-    new_seq_tensor = np.array(new_seq_tensor)
-    new_label_tensor = np.array(new_label_tensor)
-    new_seq_tensor = torch.tensor(new_seq_tensor)
-    new_label_tensor = torch.tensor(new_label_tensor)
-    """
-
     
     #split the new dataset
-    train_seq_tensor = seq_tensor[0:16000,:].to(device)
+    train_seq_tensor = seq_tensor[0:16000,:].to(device)  # [16000, 50, 18]
     train_label_tensor = label_tensor[0:16000].to(device)
-    valid_seq_tensor = seq_tensor[16000:,: ].to(device)
+    valid_seq_tensor = seq_tensor[16000:,: ].to(device)  # [4581, 50, 18]
     valid_label_tensor = label_tensor[16000:].to(device)
     
     
     '''process data for test dataset'''
     # generate labels
-    test_label = test_data['RUL'].to_numpy()
-    test_label = list(gen_labels(test_label, seq_len))   # [13046, 50]
+    test_label = list(gen_labels(test_label, seq_len))   # [13046]
+    test_label = np.array(test_label)
     test_label_tensor = torch.tensor(test_label)
     test_label_tensor = test_label_tensor.float().to(device)
     
-    test_data.drop(test_data.columns[2], axis=1, inplace=True) # can't put RUL as a feature for training
     #test_data = pca(test_data, 8)
-    test_array = list(gen_sequence(test_data, seq_len))   # [13046, 50, 26]
+    test_array = list(gen_sequence(test_data, seq_len))   # [13046]
     test_seq_tensor = torch.tensor(test_array)
     test_seq_tensor = test_seq_tensor.float().to(device) 
     
@@ -286,9 +266,6 @@ def get_batch(data_source, truth_source, i, batch_size):
         i: int
         
         seq_len : size of sequence
-        
-        d_model : the embed dim (required) --> the number of input_features
-
  
 
     Returns:
@@ -302,7 +279,7 @@ def get_batch(data_source, truth_source, i, batch_size):
     data = data_source[i:i+batch_size, :]
     data = data.view(-1, batch_size, data.shape[2]).contiguous()
 
-    target = truth_source[i:i+batch_size].permute(1, 0)
+    target = truth_source[i:i+batch_size]
 
     return data, target
 
@@ -313,17 +290,3 @@ def generate_square_subsequent_mask(sz: int) -> Tensor:
     """Generates an upper-triangular matrix of -inf, with zeros on diag."""
     return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
 
-
-def batchify(data: Tensor, bsz: int) -> Tensor:
-    """Divides the data into bsz separate sequences, removing extra elements
-    that wouldn't cleanly fit.
-    Args:
-        data: Tensor, shape [N]
-        bsz: int, batch size
-    Returns:
-        Tensor of shape [N // bsz, bsz]
-    """
-    seq_len = data.size(0) // bsz
-    data = data[:seq_len * bsz]
-    data = data.view(bsz, seq_len).t().contiguous()
-    return data.to(device)

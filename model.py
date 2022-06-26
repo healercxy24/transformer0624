@@ -79,16 +79,18 @@ class PositionalEncoding(nn.Module):
         >>> pos_encoder = PositionalEncoding(d_model)
     """
 
-    def __init__(self, d_model, dropout, max_len=21000):
+    def __init__(self, d_model, dropout, max_len=512):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        print('postion', position.size())
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0).transpose(0, 1) #[max_len, 1, d_model]
+        print('pe', pe.size())
         self.register_buffer('pe', pe)
 
 
@@ -100,10 +102,13 @@ class PositionalEncoding(nn.Module):
             x: [sequence length, batch size, embed dim]
             output: [sequence length, batch size, embed dim]
         Examples:
+            >>> x = torch.randn(50, 128, 18)
+            >>> pos_encoder = PositionalEncoding(18, 0.1)
             >>> output = pos_encoder(x)
         """
-
+        
         x = x + self.pe[:x.size(0), :]
+        print(x.size())
         return self.dropout(x)                     
 
 
@@ -140,9 +145,9 @@ class Transformer(nn.Module):
     
     def init_weights(self):
         initrange = 0.1
-        nn.init.uniform_(self.encoder.weight, -initrange, initrange)
+        nn.init.xavier_uniform_(self.encoder.weight, -initrange, initrange)
         nn.init.zeros_(self.decoder.bias)
-        nn.init.uniform_(self.decoder.weight, -initrange, initrange)
+        nn.init.xavier_uniform_(self.decoder.weight, -initrange, initrange)
 
     def forward(self, src, tgt, src_mask) -> Tensor:
         r"""Take in and process masked source/target sequences.
@@ -187,7 +192,7 @@ class Transformer(nn.Module):
             raise RuntimeError("the feature number of src and tgt must be equal to d_model")
 
         memory = self.encoder(src, mask=src_mask)
-        output = self.decoder(tgt=tgt, memory=memory)
+        output = self.decoder(tgt, memory)
         return output
 
 
@@ -235,30 +240,4 @@ class TransformerDecoderLayer(nn.Module):
         x = self.linear2(self.dropout(self.activation(self.linear1(x))))
         return self.dropout3(x)
 
-
-class Transformer(nn.Module):    
-    def __init__(self, d_model, nhead, nhid, nlayers, dropout):
-        super(Transformer, self).__init__()
-        self.d_model = d_model
-        self.pos_encoder = PositionalEncoding(d_model, dropout)
-        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, nhid, dropout)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, nlayers)
-        #self.encoder = nn.Embedding(1, d_model)
-        self.d_model = d_model
-        self.decoder = nn.Linear(d_model, 1)
-        
-        self.init_weights()
-    
-    def init_weights(self):
-        initrange = 0.1
-        #nn.init.uniform_(self.encoder.weight, -initrange, initrange)
-        nn.init.zeros_(self.decoder.bias)
-        nn.init.uniform_(self.decoder.weight, -initrange, initrange)
-    
-    def forward(self, src, src_mask):    
-        #src = self.encoder(src) * math.sqrt(self.d_model)
-        src = self.pos_encoder(src)
-        output = self.transformer_encoder(src, src_mask)
-        output = self.decoder(output)
-        return output
 """

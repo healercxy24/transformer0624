@@ -34,16 +34,18 @@ class RMSELoss(torch.nn.Module):
         return loss
     
     
-batch_size = 32
+batch_size = 256
+seq_len = 50
 
 dataset_name = 'FD001'
-dataset = get_dataset(dataset_name, 50);
+dataset = get_dataset(dataset_name, seq_len);
 test_seq = dataset['lower_test_seq_tensor']
 test_label = dataset['lower_test_label_tensor']
 
 
-model = torch.load('temp_model_FD001_18.pk1').to(device)
-criterion = RMSELoss()
+model = torch.load('temp_model_FD001_50.pk1').to(device)
+#criterion = RMSELoss()
+criterion = nn.MSELoss()
 
 
 def test(model, criterion):
@@ -53,7 +55,7 @@ def test(model, criterion):
     total_test_loss = 0
     pre_result = []  # list(101) -> (50, 128, 1)
     num_batches = test_seq.shape[0] // batch_size
-    src_mask = generate_square_subsequent_mask(18).to(device)
+    src_mask = generate_square_subsequent_mask(test_seq.shape[2]).to(device)
       
     
     with torch.no_grad():
@@ -62,7 +64,7 @@ def test(model, criterion):
             # compute the loss for the lower-level
             inputs, targets = get_batch(test_seq, test_label, i, batch_size)
             inputs = inputs.permute(2, 1, 0)  # [18, 32, 50]
-            targets = targets.reshape(1, batch_size, 50)  #[1, 32, 50]
+            targets = targets.reshape(1, batch_size, seq_len)  #[1, 32, 50]
             predictions = model(inputs, targets, src_mask)
             loss = criterion(predictions, targets)               
             

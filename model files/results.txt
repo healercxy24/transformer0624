@@ -1,0 +1,15 @@
+temp_model_FD001_50fe_256ba_956.pk1
+'''
+batch size : 256
+seq_len : 50
+lr : 5.0
+initial : xavier_uniform_
+'dropout': 0.0024820969423864202, 
+'nhid': 150, 
+'nlayers': 6
+'''
+
+FD001:best test loss: 956.8057171630859
+FD002:best test loss: 1019.198642615116
+FD003:best test loss: 887.7056264877319
+FD004:best test loss: 933.5917953491211
